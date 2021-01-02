@@ -9,18 +9,18 @@
 namespace UCenter\Controller;
 
 use UCenter\Api as UCenterApi;
-use think\Controller;
-
+use app\BaseController;
+use think\facade\Log;
+use think\facade\Request;
 /**
  * 统一UC控制器
  * Class UcController
  * @package Home\Controller
  */
-class UcController extends Controller
+class UcController
 {
     protected $uc; //统一UC实例化
     protected $authPre;//统一登录cookie前缀
-
     /**
      * 初始化
      */
@@ -72,6 +72,8 @@ class UcController extends Controller
     public function uc_login($username, $password, $is_uid = 0)
     {
         list($uid, $username, $password, $email) = $this->uc->uc_user_login($username, $password, $is_uid);//根据用户名检查用户是否存在
+        Log::write('Ucenter login successful, uid is ' .$uid . ' email is '.$email,
+            'debug');
         if ($uid > 0) {
             return $this->uc->uc_user_synlogin($uid);//同步登录；一定要输出这段代码
         }
@@ -97,7 +99,8 @@ class UcController extends Controller
      */
     public function uc_register($username, $password, $email, $question_id = '', $answer = '', $reg_ip = '')
     {
-        $ip = !empty($reg_ip) ? $reg_ip : get_client_ip();
+        Log::write('in uc_register, parameters are '.$username.'  '.$password.'  '.$email, 'notice');
+        $ip = !empty($reg_ip) ? $reg_ip : Request::host();
         return $this->uc->uc_user_register($username, $password, $email, $question_id, $answer, $ip);
     }
 

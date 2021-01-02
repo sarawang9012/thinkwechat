@@ -26,29 +26,27 @@ class Index extends BaseController
     const USER_ACTION_AVATAR = 2;
     const USER_ACTION_LOGOUT = 3;
 //全局操作
-    const GLOBAL_ACTION_RESET = 9;
+    const GLOBAL_ACTION_RESET = 999;
 //自定义菜单
     const MENU_MAIN_3 = 'MENU_MAIN_3';
     const MENU_MAIN_1_CHILD_1 = 'MENU_MAIN_1_CHILD_1';
     const MENU_MAIN_2_CHILD_1 = 'MENU_MAIN_2_CHILD_1';
-
-
-
+    private $uc;
 
 
     public function index()
     {
-        Log::write('index _get session id before set ID '. input('openid'), 'notice');
-        Log::write('index _get session id before set ID '. Session::getId(), 'notice');
-       // Log::write('_get session id'. json_encode(Session::all()), 'notice');
+        Log::write('index _get session id before set ID ' . input('openid'), 'debug');
+        Log::write('index _get session id before set ID ' . Session::getId(), 'debug');
+
+        $ip = Request::host();
+        Log::write('client ip is ' . $ip, 'debug');
 
         $wechat = new ThinkWechat(config('app.WECHAT.TOKEN'));
+        $this->uc = new uc();
 
         $data = $wechat->request();
-       // Log::write('index _get session id  From '. $data['FromUserName'], 'notice');
-        //Log::write('index _get session id  From '. strlen(md5($data['FromUserName'])), 'notice');
-       /// Session::setId(md5($data['FromUserName']));
-       // Log::write('index _get session id after set ID '. Session::getId(), 'notice');
+
         list($content, $type) = $this->_handle($data);
         return $wechat->response($content, $type);
 
@@ -56,9 +54,6 @@ class Index extends BaseController
 
     private function _handle(array $data)
     {
-
-
-
         if ($data['MsgType'] == 'text') {
 
             return $this->_handleText($data);
@@ -176,10 +171,9 @@ class Index extends BaseController
     {
         if ($data['Content'] == self::GLOBAL_ACTION_RESET) {
             $this->_resetSession();
-            Log::write('_handleGlobalAction after reset session', 'notice');
+            Log::write('_handleGlobalAction after reset session', 'debug');
             return array(join("\n", array_merge(array('重置成功'), $this->_guestActions())), 'text');
         }
-
         return false;
     }
 
@@ -198,13 +192,13 @@ class Index extends BaseController
         }
         //游客
         if ($this->_isGuest()) {
-        //没有选择任何步骤
+            //没有选择任何步骤
 
             if (!$this->_currentStep()) {
                 if ($data['Content'] == self::GUEST_ACTION_REGISTER) {
                     $this->_setStep(self::STEP_REGISTER_USERNAME);
 
-                    Log::write('before register current step is  ' . $this->_currentStep(), 'notice');
+                    Log::write('before register current step is  ' . $this->_currentStep(), 'debug');
                     return array(
                         '【Register】请输入您的用户名',
                         'text'
@@ -220,55 +214,132 @@ class Index extends BaseController
                 }
             }
             //注册->输入用户名
-            Log::write('current ID is  ' . Session::getId(), 'notice');
-            Log::write('current step is  ' . Session::get('step'), 'notice');
-            if ($this->_currentStep() == self::STEP_REGISTER_USERNAME) {
-                $this->_setStep(self::STEP_REGISTER_PASSWORD);
-                Session::set('username', $data['Content']);
-                Log::write('input username is ' . Session::get('username'), 'notice');
-                return array('【注册】请输入密码', 'text');
+            Log::write('current ID is  ' . Session::getId(), 'debug');
+            Log::write('current step is  ' . Session::get('step'), 'debug');
+
+            if ($this->_currentStep() == self::STEP_REGISTER_USERNAME){
+                Log::write('input username is ' . $data['Content'], 'debug');
+                $username = $data['Content'];
+                $result = $this->uc->uc_check_name($username);
+                switch ($result) {
+                    case -1:
+                        $reason = "用户名不合法";
+                        break;
+                    case -2:
+                        $reason = "包含不允许注册的词语";
+                        break;
+                    case -3:
+                        $reason = "用户名已经存在";
+                        break;
+                }
+                if ($result != 1 ){
+                    $this->_resetStep();
+                    return array(join("\n", array_merge(array('【注册】注册失败', $reason), $this->_guestActions()
+                    )),
+                        'text');
+                } else {
+                    $this->_setStep(self::STEP_REGISTER_PASSWORD);
+                    Session::set('username', $data['Content']);
+
+                    return array('【注册】请输入密码', 'text');
+                }
             }
+
+
             //注册->输入密码
             if ($this->_currentStep() == self::STEP_REGISTER_PASSWORD) {
                 $this->_resetStep();
                 Session::set('password', $data['Content']);
-                return array(join("\n", array_merge(array('【注册】注册成功'), $this->_guestActions())), 'text');
-            }
-            //登录->输入用户名
-            if ($this->_currentStep() == self::STEP_LOGIN_USERNAME) {
-                if ($data['Content'] != session('username')) {
-                    $results = array(
-                        join("\n", array(
-                            "【登录】用户名错误",
-                            "回复用户名继续操作",
-                            "回复999重新开始会话"
+                //call ucenter to register user
+                $username_valid = $this->uc->uc_check_name(Session::get('username'));
+                Log::write('$username_valid' . $username_valid, 'debug');
+                if ($username_valid == 1) {
+                    //register
+                    Log::write('start register ' . Session::get('username'), 'debug');
+                    $email = "reg_" . substr(Session::getId(), 0, 3) . time() . substr(Session::getId(), 7, 4) . "@null.com";
+                    //$email = Session::get('username').'@'.Session::get('username').'.com';
+                    $register_result = $this->uc->uc_register(Session::get('username'), Session::get('password'),
+                        $email);
+                    Log::write('register result is ' . $register_result, 'debug');
+                    switch ($register_result) {
+                        case -1:
+                            $reason = "用户名不合法";
+                            break;
+                        case -2:
+                            $reason = "包含不允许注册的词语";
+                            break;
+                        case -3:
+                            $reason = "用户名已经存在";
+                            break;
+                        case -4:
+                            $reason = "Email格式有误";
+                            break;
+                        case -5:
+                            $reason = "Email不允许注册";
+                            break;
+                        case -6:
+                            $reason = "该Email已经被注册";
+                            break;
+                    }
+                    if ($register_result > 0) {
+                        Log::write('Ucenter register successful' . Session::get('username'), 'debug');
+                        return array(join("\n", array_merge(array('【注册】注册成功'), $this->_guestActions())), 'text');
+                    } else {
+                        Log::write('Ucenter register failed' . $reason, 'debug');
+                        $this->_resetSession();
+                        return array(join("\n", array_merge(array('【注册】注册失败', $reason), $this->_guestActions()
                         )),
-                        'text'
-                    );
-                    return $results;
-                }
-                $this->_setStep(self::STEP_LOGIN_PASSWORD);
-                return array('【登录】请输入密码', 'text');
-            }
-//登录->输入密码
-            if ($this->_currentStep() == self::STEP_LOGIN_PASSWORD) {
-                if ($data['Content'] != session('password')) {
-                    return array(
-                        join("\n", array(
-                            "【登录】密码错误",
-                            "回复密码继续操作",
-                            "回复999重新开始会话"
-                        )),
-                        'text'
-                    );
+                            'text');
+                    }
                 }
 
-                $this->_login();
-                $this->_resetStep();
-                return array(join("\n", array_merge(array('【登录】登录成功'), $this->_userActions())), 'text');
             }
-            return array(join("\n", $this->_guestActions()), 'text');
-        } else {
+                    //登录->输入用户名
+                    if ($this->_currentStep() == self::STEP_LOGIN_USERNAME) {
+                        //check username exists
+                        $result = $this->uc->uc_check_name($data['Content']);
+                        Log::write('Ucenter uc_check_name while login' . $result, 'debug');
+                        if ($result != -3 ) {
+                            $results = array(
+                                join("\n", array(
+                                    "【登录】用户名错误",
+                                    "回复用户名继续操作",
+                                    "回复999重新开始会话"
+                                )),
+                                'text'
+                            );
+                            return $results;
+                        } else {
+                            Session::set('username', $data['Content']);
+                        }
+                        $this->_setStep(self::STEP_LOGIN_PASSWORD);
+                        return array('【登录】请输入密码', 'text');
+                    }
+                    //登录->输入密码
+                    if ($this->_currentStep() == self::STEP_LOGIN_PASSWORD) {
+                        //check password in ucenter db
+                        $result = $this->uc->uc_login(Session::get('username'), $data['Content']);
+                        Log::write('Ucenter login successful, username is ' .json_encode($result),
+                            'debug');
+                        if ($result < 0) {
+                            return array(
+                                join("\n", array(
+                                    "【登录】密码错误",
+                                    "回复密码继续操作",
+                                    "回复999重新开始会话"
+                                )),
+                                'text'
+                            );
+                        } else {
+                            Session::set('password', $data['Content']);
+                        }
+
+                        $this->_login();
+                        $this->_resetStep();
+                        return array(join("\n", array_merge(array('【登录】登录成功'), $this->_userActions())), 'text');
+                    }
+                    return array(join("\n", $this->_guestActions()), 'text');
+            } else {
             if (!$this->_currentStep()) {
                 if ($data['Content'] == self::USER_ACTION_INFO) {
                     return array(
@@ -308,7 +379,8 @@ class Index extends BaseController
      * @param array $data
      * @return array
      */
-    private function _handleImage(array $data)
+    private
+    function _handleImage(array $data)
     {
         if ($this->_currentStep() != self::STEP_AVATAR_UPLOAD) {
             $messages = array('操作有误');
@@ -329,7 +401,8 @@ class Index extends BaseController
      * @param array $data
      * @return array
      */
-    private function _handleEvent(array $data)
+    private
+    function _handleEvent(array $data)
     {
         if ($data['Event'] == 'subscribe') {
             return array(join("\n", array_merge(array('欢迎关注！'), $this->_guestActions())), 'text');
@@ -345,7 +418,8 @@ class Index extends BaseController
      * @param $key
      * @return array
      */
-    private function _handleMenuClick($key)
+    private
+    function _handleMenuClick($key)
     {
         switch ($key) {
             case self::MENU_MAIN_3:
@@ -362,7 +436,8 @@ class Index extends BaseController
     /**
      * 创建自定义菜单
      */
-    public function menu()
+    public
+    function menu()
     {
         require __DIR__ . '/../../vendor/autoload.php';
         $data = array(
@@ -419,7 +494,8 @@ class Index extends BaseController
     /**
      * 读取AccessToken
      */
-    private function _getAccessToken()
+    private
+    function _getAccessToken()
     {
         $cacheKey = config('app.WECHAT.APPID') . 'accessToken';
         $data = session($cacheKey);
