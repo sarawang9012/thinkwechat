@@ -9,7 +9,6 @@
 namespace UCenter\Controller;
 
 use UCenter\Api as UCenterApi;
-use app\BaseController;
 use think\facade\Log;
 use think\facade\Request;
 /**

@@ -6,6 +6,9 @@ use app\BaseController;
 use app\library\ThinkWechat;
 use think\facade\Request;
 use think\facade\Session;
+use think\facade\Cache;
+use GuzzleHttp\Client;
+use GuzzleHttp\Exception\GuzzleException;
 
 class Index extends BaseController
 {
@@ -217,7 +220,7 @@ class Index extends BaseController
             Log::write('current ID is  ' . Session::getId(), 'debug');
             Log::write('current step is  ' . Session::get('step'), 'debug');
 
-            if ($this->_currentStep() == self::STEP_REGISTER_USERNAME){
+            if ($this->_currentStep() == self::STEP_REGISTER_USERNAME) {
                 Log::write('input username is ' . $data['Content'], 'debug');
                 $username = $data['Content'];
                 $result = $this->uc->uc_check_name($username);
@@ -232,7 +235,7 @@ class Index extends BaseController
                         $reason = "用户名已经存在";
                         break;
                 }
-                if ($result != 1 ){
+                if ($result != 1) {
                     $this->_resetStep();
                     return array(join("\n", array_merge(array('【注册】注册失败', $reason), $this->_guestActions()
                     )),
@@ -295,52 +298,52 @@ class Index extends BaseController
                 }
 
             }
-                    //登录->输入用户名
-                    if ($this->_currentStep() == self::STEP_LOGIN_USERNAME) {
-                        //check username exists
-                        $result = $this->uc->uc_check_name($data['Content']);
-                        Log::write('Ucenter uc_check_name while login' . $result, 'debug');
-                        if ($result != -3 ) {
-                            $results = array(
-                                join("\n", array(
-                                    "【登录】用户名错误",
-                                    "回复用户名继续操作",
-                                    "回复999重新开始会话"
-                                )),
-                                'text'
-                            );
-                            return $results;
-                        } else {
-                            Session::set('username', $data['Content']);
-                        }
-                        $this->_setStep(self::STEP_LOGIN_PASSWORD);
-                        return array('【登录】请输入密码', 'text');
-                    }
-                    //登录->输入密码
-                    if ($this->_currentStep() == self::STEP_LOGIN_PASSWORD) {
-                        //check password in ucenter db
-                        $result = $this->uc->uc_login(Session::get('username'), $data['Content']);
-                        Log::write('Ucenter login successful, username is ' .json_encode($result),
-                            'debug');
-                        if ($result < 0) {
-                            return array(
-                                join("\n", array(
-                                    "【登录】密码错误",
-                                    "回复密码继续操作",
-                                    "回复999重新开始会话"
-                                )),
-                                'text'
-                            );
-                        } else {
-                            Session::set('password', $data['Content']);
-                        }
+            //登录->输入用户名
+            if ($this->_currentStep() == self::STEP_LOGIN_USERNAME) {
+                //check username exists
+                $result = $this->uc->uc_check_name($data['Content']);
+                Log::write('Ucenter uc_check_name while login' . $result, 'debug');
+                if ($result != -3) {
+                    $results = array(
+                        join("\n", array(
+                            "【登录】用户名错误",
+                            "回复用户名继续操作",
+                            "回复999重新开始会话"
+                        )),
+                        'text'
+                    );
+                    return $results;
+                } else {
+                    Session::set('username', $data['Content']);
+                }
+                $this->_setStep(self::STEP_LOGIN_PASSWORD);
+                return array('【登录】请输入密码', 'text');
+            }
+            //登录->输入密码
+            if ($this->_currentStep() == self::STEP_LOGIN_PASSWORD) {
+                //check password in ucenter db
+                $result = $this->uc->uc_login(Session::get('username'), $data['Content']);
+                Log::write('Ucenter login successful, username is ' . json_encode($result),
+                    'debug');
+                if ($result < 0) {
+                    return array(
+                        join("\n", array(
+                            "【登录】密码错误",
+                            "回复密码继续操作",
+                            "回复999重新开始会话"
+                        )),
+                        'text'
+                    );
+                } else {
+                    Session::set('password', $data['Content']);
+                }
 
-                        $this->_login();
-                        $this->_resetStep();
-                        return array(join("\n", array_merge(array('【登录】登录成功'), $this->_userActions())), 'text');
-                    }
-                    return array(join("\n", $this->_guestActions()), 'text');
-            } else {
+                $this->_login();
+                $this->_resetStep();
+                return array(join("\n", array_merge(array('【登录】登录成功'), $this->_userActions())), 'text');
+            }
+            return array(join("\n", $this->_guestActions()), 'text');
+        } else {
             if (!$this->_currentStep()) {
                 if ($data['Content'] == self::USER_ACTION_INFO) {
                     return array(
@@ -437,10 +440,10 @@ class Index extends BaseController
     /**
      * 创建自定义菜单
      */
-    public
-    function menu()
+    public function menu()
     {
         require __DIR__ . '/../../vendor/autoload.php';
+        //构建HTTP post JSON body数据
         $data = array(
             'button' => array(
                 array(
@@ -454,7 +457,7 @@ class Index extends BaseController
                         ),
                         array(
                             'type' => 'view',
-                            'name' => '百度一下',
+                            'name' => '百度',
                             'url' => 'https://www.baidu.com'
                         )
                     )
@@ -482,44 +485,69 @@ class Index extends BaseController
                 )
             )
         );
+        //构造请求json body和header数据
+        $options = json_encode($data, JSON_UNESCAPED_UNICODE);
+        $jsonData = [
+            'body' => $options,
+            'headers' => ['content-type' => 'application/json']
+        ];
 
-        $url = 'https://api.weixin.qq.com/cgi-bin/menu/create?access_token=' . $this->_getAccessToken();
+        $resp = null;
+        try {
+            $client = new Client();
+            //生成微信公众号菜单需要调用的微信接口url
+            $url = 'https://api.weixin.qq.com/cgi-bin/menu/create?access_token=' . $this->_getAccessToken();
+            //发送http post请求
+            $resp = $client->post($url, $jsonData);
+        } catch (GuzzleException $e){
+            print($e);
+        }
 
-        $resp = Requests::post($url, array(), json_encode($data, JSON_UNESCAPED_UNICODE));
-        if ($resp->status_code != 200) {
+
+        if (empty($resp)) {
             return null;
         }
-        echo $resp->body;
+
+        echo $resp->getBody();
     }
 
     /**
      * 读取AccessToken
      */
-    private
-    function _getAccessToken()
+    private function _getAccessToken()
     {
         $cacheKey = config('app.WECHAT.APPID') . 'accessToken';
-        $data = session($cacheKey);
+        $data = Cache::get($cacheKey);
         if (!empty($data)) {
             return $data;
         }
         require __DIR__ . '/../../vendor/autoload.php';
+        //微信公众平台获取access token url
         $url = 'https://api.weixin.qq.com/cgi-bin/token?';
+        //获取access token时需要携带的参数
         $params = array(
             'grant_type' => 'client_credential',
             'appid' => config('app.WECHAT.APPID'),
             'secret' => config('app.WECHAT.SECRET')
         );
+        $resp = null;
+        try {
+            //使用GuzzleHTTP发送get请求
+            $client = new Client();
+            $resp = $client->request('GET', $url.http_build_query($params));
+        } catch (GuzzleException $e){
+            print($e);
+        }
 
-        $resp = Request::get($url . http_build_query($params));
-        if ($resp->status_code != 200) {
+        if (empty($resp)) {
             return null;
         }
-        $data = json_decode($resp->body, true);
+        //获取微信公众平台的response
+        $data = json_decode($resp->getBody(), true);
         if (isset($data['errcode']) && $data['errcode'] != 0) {
-            throw new \Exception($data['errmsg'], $data['errcode']);
+            throw new \think\Exception ($data['errmsg'], $data['errcode']);
         }
-        session($cacheKey, $data['access_token'], 7000);
+        Cache::set($cacheKey, $data['access_token'], 7000);
         return $data['access_token'];
     }
 }
