@@ -256,7 +256,8 @@ class Index extends BaseController
                 if ($username_valid == 1) {
                     //register
                     Log::write('start register ' . Session::get('username'), 'debug');
-                    $email = "reg_" . substr(Session::getId(), 0, 3) . time() . substr(Session::getId(), 7, 4) . "@null.com";
+                    $email = "reg_" . substr(Session::getId(), 0, 3) . time() . substr(Session::getId(), 7, 4) .
+                        "@null.null";
                     //$email = Session::get('username').'@'.Session::get('username').'.com';
                     $register_result = $this->uc->uc_register(Session::get('username'), Session::get('password'),
                         $email);
